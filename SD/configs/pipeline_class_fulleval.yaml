@@ -1,0 +1,66 @@
+# =============================================================================
+# SD Class Forgetting – Full Evaluation (reference data sizes)
+# =============================================================================
+# This config mirrors pipeline_class.yaml but uses full reference sizes:
+#   - All Imagenette prompts (max_prompts: null)
+#   - 10 samples per prompt
+#   - No FID subset caps (max_real/max_fake: null)
+#
+# Hyperparameters are overridden by the SLURM launch script.
+#
+# Usage:
+#   cd SD
+#   python pipeline.py --config configs/pipeline_class_fulleval.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-sd"
+  entity: oneandzero24
+  group: "class-fulleval"
+  tags: ["sd", "class-wise", "intact", "fulleval"]
+
+pipeline:
+  setting: "sd"
+  seed: 42
+  device: "0"
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  prompts: "prompts/imagenette.csv"
+  output_dir: "/shared/results/common/miksa/intact/SD/fulleval"
+  model_save_dir: "/shared/results/common/miksa/intact/SD/models"
+  logs_dir: "/shared/results/common/miksa/intact/SD/logs"
+
+unlearn:
+  method: "intact"
+  class_to_forget: 0
+  alpha: 0.0
+  batch_size: 8
+  epochs: 2
+  lr: 5.0e-6
+  image_size: 512
+
+intact:
+  base_method: "rl"
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+
+evaluate:
+  num_samples_per_prompt: 10
+  max_prompts: null                    # null = use all prompts
+  guidance_scale: 7.5
+  ddim_steps: 100
+  n_sample_images_per_class: 4
+
+  fid:
+    enabled: true
+    max_real: null                     # null = full reference set
+    max_fake: null                     # null = full generated set

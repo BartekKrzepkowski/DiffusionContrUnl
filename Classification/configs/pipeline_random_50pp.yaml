@@ -1,0 +1,56 @@
+# ============================================================================
+# Classification Pipeline – Random Data Forgetting
+# ============================================================================
+# Usage:
+#   cd Classification
+#   python pipeline.py --config configs/pipeline_random.yaml
+
+wandb:
+  project: "intact-classifier"
+  entity: "oneandzero24"                    # set to your wandb team/user, or leave null
+  group: "random"
+  tags: ["random", "cifar10", "50%"]
+
+paths:
+  data_dir: "../data"
+  pretrained_ckpt: "/shared/results/common/miksa/intact/Cls/models/0checkpoint.pth.tar"           # e.g. "./checkpoints/resnet18_cifar10_best.pth"
+  output_dir: "/shared/results/common/miksa/intact/Cls/random/"  # Where generated outputs/logs are saved
+  checkpoint_dir: "/shared/results/common/miksa/intact/Cls/random/checkpoints"  # Where model checkpoints are saved
+
+data:
+  dataset: "cifar10"
+  num_classes: 10
+  input_size: 32
+  num_workers: 4
+
+model:
+  arch: "resnet18"
+  imagenet_arch: false
+
+pipeline:
+  setting: "classifier_random"
+  seed: 2
+  gpu: 0
+
+unlearn:
+  method: "intact"                 # intact | retrain | GA | FT | RL | …
+  num_indexes_to_replace: 22500     # number of random samples to forget
+  batch_size: 256
+  unlearn_lr: 1e-3
+  unlearn_epochs: 10
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  alpha: 0.0
+  retrain_epochs: 182
+  decreasing_lr: "91,136"
+
+intact:
+  base_method: "rl"
+  targets: ["conv1x1", "fc"]  # Protect conv layers in layer3/4 + classifier
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true

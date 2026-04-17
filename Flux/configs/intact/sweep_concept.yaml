@@ -1,0 +1,31 @@
+# =============================================================================
+# wandb Sweep — Flux InTAct Concept Erasure
+# =============================================================================
+# Usage:
+#   cd Flux
+#   wandb sweep configs/intact/sweep_concept.yaml
+#   wandb agent <sweep-id>
+# =============================================================================
+
+program: intact_pipeline.py
+method: grid
+name: flux-intact-concept-sweep
+entity: null
+project: intact-flux
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config"
+  - "configs/intact/pipeline_concept.yaml"
+
+parameters:
+  unlearn.learning_rate:
+    values: [1.0e-5, 5.0e-5, 1.0e-4]
+  unlearn.max_train_steps:
+    values: [100, 200, 500]
+  intact.lambda_interval:
+    values: [0.5, 1.0, 5.0, 10.0]
+  unlearn.base_method:
+    values: ["esd"]

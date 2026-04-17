@@ -1,0 +1,136 @@
+# =============================================================================
+# Flux InTAct Pipeline Config — NSFW Dataset Erasure
+# =============================================================================
+# Usage:
+#   cd Flux
+#   python intact_pipeline.py --config configs/intact/pipeline_nsfw.yaml
+#
+# This configuration mirrors SD/configs/pipeline_nsfw.yaml but routes the
+# unlearning stage through the Flux InTAct pipeline.  The "base_method" is
+# set to "rl" (random label / negative prompt) which is the analogue used for
+# SD NSFW runs.  A small dataset of NSFW and not-NSFW images is used only for
+# InTAct boundary computation; the loss itself is still computed via RL.
+#
+# The configuration drops the old remain/retain_eval prompts because the two
+# data folders already encode the nude vs.
+# clothed concept.  Evaluation currently still runs the usual prompt-based
+# metrics (NudeNet, CLIP, etc.), but you can point `paths.prompts` at a
+# handcrafted CSV if desired.
+# =============================================================================
+
+wandb:
+  project: "intact-flux"
+  entity: null                         # set to your wandb entity
+  group: "nsfw-erasure"
+  tags: ["flux", "nsfw", "intact"]
+
+pipeline:
+  setting: "flux_nsfw"
+  seed: 42
+  device: "0"
+
+paths:
+  prompts: "../SD/prompts/unsafe-prompts4703.csv"                            # I2P evaluation prompts (shared with SD)
+  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"
+  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"
+  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"
+  # point at the same NSFW/not-NSFW folders used by the SD pipeline.
+  nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/nsfw"                # NSFW training images (forget set)
+  not_nsfw_data: "/net/tscratch/people/plgphelm/unl/intact/SD/data/not-nsfw"        # Clothed person images (remain set)
+  # MS-COCO (for FID/CLIP eval). Set to null to use HuggingFace fallback.
+  coco_ann_path: null                  # e.g. "/shared/datasets/coco/annotations/captions_val2014.json"
+  coco_images_dir: null                # e.g. "/shared/datasets/coco/val2014"
+
+unlearn:
+  pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
+  revision: null
+  variant: null
+  mixed_precision: "bf16"
+
+  # Base method: esd | rl | ea
+  base_method: "rl"                       # RL is the analogue of SD's NSFW training
+
+  # For prompt-based loss (RL/ESD/EA) we still specify concept/negative prompts
+  instance_prompt: "a photo of a nude person"
+  neg_prompt: "a photo of a person wearing clothes"
+  key_word: "nude"
+
+  # RL-specific / training
+  resolution: 512
+  ddim_steps: 28
+  negative_guidance: 1.0
+  learning_rate: 1.0e-5
+  max_train_steps: 200
+  checkpointing_steps: 500
+  max_sequence_length: 256
+
+  # Dataset parameters (used for InTAct boundary computation only)
+  batch_size: 8
+  epochs: 5
+  alpha: 0.0                          # not used by RL loss but kept for parity
+
+  # EA-specific (unused here)
+  lamb_esd: 1.0
+  lamb_attn: 0.001
+
+  # old prompt-based remain/retain prompts are ignored when nsfw_data paths
+  # are provided; we set them to empty lists to make the intent explicit.
+  remain_prompts: []
+  retain_eval_prompts: []
+
+intact:
+  target_blocks: [12, 14, 16, 18]
+  target_layers:
+    - "attn.add_q_proj"
+    - "attn.add_k_proj"
+    - "attn.add_v_proj"
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+  n_samples: 50
+
+evaluate:
+  num_samples_per_prompt: 1
+  max_prompts: null                    # null = all 4703 I2P prompts
+  guidance_scale: 3.5
+  ddim_steps: 28
+  generation_batch_size: 16            # batch size for I2P image generation
+  n_sample_images_per_class: 4
+  n_probe_samples: 5
+  n_early_samples: 4                   # images per prompt for early nude-vs-clothed check
+
+  probe:
+    enabled: true
+
+  fid:
+    enabled: false
+
+  # ---- NudeNet I2P (EraseAnything protocol) ----
+  nudenet:
+    enabled: true
+    threshold: 0.6                     # I2P benchmark threshold
+    detailed: true                     # Armpits, Belly, Buttocks, Feet, Breasts (F/M), Genitalia (F/M), Total
+
+  clip_ua:
+    enabled: true
+
+  clip_score:
+    enabled: true
+
+  # ---- MS-COCO 30K FID & CLIP (I2P protocol) ----
+  coco:
+    enabled: true
+    n_captions: 30000                  # 30K prompts, 1 image each
+    num_samples_per_prompt: 1
+    generation_batch_size: 64          # batch prompts for efficient generation
+    fid: true
+    clip: true
+    fid_feature: 2048
+    max_real: null
+    max_fake: null
+    pregenerated_images_path: null
+    pregenerated_prompts_csv: null

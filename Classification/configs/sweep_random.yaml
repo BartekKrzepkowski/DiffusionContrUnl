@@ -1,0 +1,29 @@
+# ============================================================================
+# wandb sweep – Classification Random Data Forgetting (example)
+# ============================================================================
+# Usage:
+#   cd Classification
+#   wandb sweep configs/sweep_random.yaml
+#   wandb agent <sweep-id>
+
+program: pipeline.py
+method: grid
+entity: oneandzero24
+project: intact-classification
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - configs/pipeline_random.yaml
+
+parameters:
+  unlearn.unlearn_lr:
+    values: [0.05, 0.013, 0.005, 0.001]
+  unlearn.unlearn_epochs:
+    values: [5, 10, 20]
+  intact.lambda_interval:
+    values: [10.0, 50.0, 100.0, 500.0]
+  intact.base_method:
+    values: ["ga", "rl"]

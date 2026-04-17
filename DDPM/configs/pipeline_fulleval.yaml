@@ -1,0 +1,90 @@
+# ============================================================================
+# DDPM Pipeline – Full Evaluation (reference data sizes)
+# ============================================================================
+# This config mirrors pipeline.yaml but uses reference-paper data sizes:
+#   FID: 5000 samples per class  |  Classifier: 500 samples per class
+#
+# Hyperparameters are overridden by the SLURM launch script via
+# a temporary config file per job.
+#
+# Usage:
+#   cd DDPM
+#   python pipeline.py --config configs/pipeline_fulleval.yaml
+# ============================================================================
+
+wandb:
+  project: "intact-ddpm"
+  entity: "oneandzero24"
+  group: "cifar10-fulleval"
+  tags: ["ddpm", "cifar10", "intact", "fulleval"]
+
+# ---- paths (adjust to your environment) ----
+paths:
+  pretrained_ckpt_folder: /shared/results/common/miksa/intact/DDPM/results/cifar10/2026_01_13_220000
+  output_dir: "/shared/results/common/miksa/intact/DDPM/results/fulleval"
+  checkpoint_dir: "/shared/results/common/miksa/intact/DDPM/results/fulleval/checkpoints"
+  ref_dataset_dir: /shared/results/common/miksa/intact/DDPM/results/cifar10_without_label_0
+  classifier_ckpt: "/shared/results/common/miksa/intact/DDPM/models/cifar10_resnet34.pth"
+
+# ---- model config ----
+model_config: "configs/cifar10_intact.yml"
+
+# ---- data ----
+data:
+  dataset: "CIFAR10"
+  n_classes: 10
+
+# ---- pipeline ----
+pipeline:
+  seed: 1234
+
+# ---- sampling ----
+cond_scale: 2.0
+sample_type: "generalized"
+skip_type: "uniform"
+timesteps: 1000
+eta: 1.0
+
+# ---- unlearning (overridden per job) ----
+unlearn:
+  mode: "intact"
+  label_to_forget: 0
+  method: "rl"
+  lr: 1.0e-3
+  n_iters: 1500
+  batch_size: 128
+  alpha: 0.0
+  negative_guidance: 7.5
+
+# ---- InTAct parameters ----
+intact:
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  normalize_protection: true
+  use_actual_bounds: true
+  targets:
+    - "attn.0.q"
+    - "attn.0.k"
+    - "attn.0.v"
+    - "attn_1.q"
+    - "attn_1.k"
+    - "attn_1.v"
+    - "attn.1.q"
+    - "attn.1.k"
+    - "attn.1.v"
+    - "cemb.dense.0"
+    - "cemb.dense.1"
+
+# ---- evaluation (FULL reference sizes) ----
+evaluate:
+  n_samples_per_class: 500            # classifier eval: 500 per class (paper reference)
+  n_sample_images_per_class: 8        # wandb image previews
+  fid:
+    enabled: true
+    n_samples_per_class: 5000         # FID: 5000 per class (paper reference)
+  classifier:
+    enabled: true
+    n_samples_per_class: 500

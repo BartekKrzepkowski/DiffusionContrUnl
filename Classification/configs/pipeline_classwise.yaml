@@ -1,0 +1,63 @@
+# ============================================================================
+# Classification Pipeline – Class-Wise Forgetting
+# ============================================================================
+# Usage:
+#   cd Classification
+#   python pipeline.py --config configs/pipeline_classwise.yaml
+
+wandb:
+  project: "intact-classifier"
+  entity: "oneandzero24"                    # set to your wandb team/user, or leave null
+  group: "classwise"
+  tags: ["classwise", "cifar10"]
+
+# ---- paths (adjust to your environment) ----
+paths:
+  data_dir: "../data"              # root data folder
+  pretrained_ckpt: "/shared/results/common/miksa/intact/Cls/models/0checkpoint.pth.tar"             # e.g. "./checkpoints/resnet18_cifar10_best.pth"
+  output_dir: "/shared/results/common/miksa/intact/Cls/class/"  # Where generated outputs/logs are saved
+  checkpoint_dir: "/shared/results/common/miksa/intact/Cls/class/checkpoints"  # Where model checkpoints are saved
+
+# ---- data ----
+data:
+  dataset: "cifar10"               # cifar10 | cifar100 | svhn | TinyImagenet
+  num_classes: 10
+  input_size: 32
+  num_workers: 4
+
+# ---- model ----
+model:
+  arch: "resnet18"                 # resnet18 | resnet50 | VGG16_bn | …
+  imagenet_arch: false
+
+# ---- pipeline ----
+pipeline:
+  setting: "classifier_classwise"  # classifier_classwise | classifier_random
+  seed: 2
+  gpu: 0
+
+# ---- unlearning ----
+unlearn:
+  method: "intact"                 # intact | retrain | GA | FT | RL | fisher | wfisher | raw | …
+  class_to_forget: 0               # which class to forget (0-9 for cifar10)
+  batch_size: 256
+  unlearn_lr: 1e-3
+  unlearn_epochs: 10
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  alpha: 0.0                       # GA/FT regularization weight
+  # only needed for retrain baseline:
+  retrain_epochs: 182
+  decreasing_lr: "91,136"
+
+# ---- InTAct parameters (only used when method=intact) ----
+intact:
+  base_method: "rl"                # ga | rl
+  targets: ["conv1x1", "fc"]  # Protect conv layers in layer3/4 + classifier
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true

@@ -1,0 +1,121 @@
+# InTAct Unlearning Config for Stable Diffusion
+# Targets cross-attention Q/K/V projections (to_q, to_k, to_v in CrossAttention modules)
+
+# SD Model Configuration (inherit from v1-inference.yaml)
+model:
+  base_learning_rate: 1.0e-05
+  target: ldm.models.diffusion.ddpm.LatentDiffusion
+  params:
+    linear_start: 0.00085
+    linear_end: 0.0120
+    num_timesteps_cond: 1
+    log_every_t: 200
+    timesteps: 1000
+    first_stage_key: "jpg"
+    cond_stage_key: "txt"
+    image_size: 64
+    channels: 4
+    cond_stage_trainable: false
+    conditioning_key: crossattn
+    monitor: val/loss_simple_ema
+    scale_factor: 0.18215
+    use_ema: False
+
+    scheduler_config:
+      target: ldm.lr_scheduler.LambdaLinearScheduler
+      params:
+        warm_up_steps: [ 10000 ]
+        cycle_lengths: [ 10000000000000 ]
+        f_start: [ 1.e-6 ]
+        f_max: [ 1. ]
+        f_min: [ 1. ]
+
+    unet_config:
+      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      params:
+        image_size: 32
+        in_channels: 4
+        out_channels: 4
+        model_channels: 320
+        attention_resolutions: [ 4, 2, 1 ]
+        num_res_blocks: 2
+        channel_mult: [ 1, 2, 4, 4 ]
+        num_heads: 8
+        use_spatial_transformer: True
+        transformer_depth: 1
+        context_dim: 768
+        use_checkpoint: True
+        legacy: False
+
+    first_stage_config:
+      target: ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult:
+          - 1
+          - 2
+          - 4
+          - 4
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    cond_stage_config:
+      target: ldm.modules.encoders.modules.FrozenCLIPEmbedder
+
+# InTAct Training Configuration
+training:
+  # Base method: ga, el, nsfw, esd
+  base_method: "rl"
+  
+  # Standard training params
+  batch_size: 8
+  epochs: 5
+  lr: 5.0e-06
+  alpha: 0.0  # Weight for remain loss
+  
+  # ESD-specific (if base_method=esd)
+  iterations: 1000
+  start_guidance: 3.0
+  negative_guidance: 1.0
+  
+  # Layer selection: xattn, selfattn, full, noxattn
+  train_method: "xattn"
+
+  # InTAct-specific parameters
+  # Target cross-attention Q/K/V projections in SD's UNet
+  # These are nn.Linear layers inside CrossAttention modules
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']  
+
+  lambda_interval: 10.0           # Protection loss weight
+  lower_percentile: 0.05         # Activation safe zone lower bound
+  upper_percentile: 0.95         # Activation safe zone upper bound
+  reduced_dim: 64                # SVD dimension for efficiency
+  infinity_scale: 20.0           # Scale for negative space intervals
+  normalize_protection: true     # Normalize by number of layers
+  use_actual_bounds: true      # Use actual min/max from remain+forget
+
+# Data configuration
+data:
+  image_size: 512
+  
+# What to forget
+forget:
+  # For class-based forgetting (ga, rl methods)
+  class_to_forget: 0
+  
+  # For prompt-based forgetting (esd method)
+  prompt: null
+  seperator: null
+
+comments: "InTAct unlearning for SD protecting cross-attention Q/K/V projections"

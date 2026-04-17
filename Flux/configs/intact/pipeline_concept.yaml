@@ -1,0 +1,155 @@
+# =============================================================================
+# Flux InTAct Pipeline Config — Concept Erasure (e.g., NSFW / Nudity)
+# =============================================================================
+# Usage:
+#   cd Flux
+#   python intact_pipeline.py --config configs/intact/pipeline_concept.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-flux"
+  entity: null                         # set to your wandb entity
+  group: "concept-erasure"
+  tags: ["flux", "concept", "intact"]
+
+pipeline:
+  setting: "flux_concept"
+  seed: 42
+  device: "0"                          # CUDA device id
+
+paths:
+  prompts: "../SD/prompts/unsafe-prompts4703.csv"                            # I2P 4703 evaluation prompts (shared with SD)
+  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"                # where generated images / probes are saved
+  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"                # where safetensors checkpoints go
+  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"                        # where training logs/losses are saved
+  reference_data: null                                                       # (optional) real reference images for FID
+  # optional NSFW dataset paths (if you want to use a real dataset instead of
+  # synthetic prompts for InTAct activation bounds):
+  # nsfw_data: "/path/to/nsfw"
+  # not_nsfw_data: "/path/to/not-nsfw"
+
+unlearn:
+  pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
+  revision: null
+  variant: null
+  mixed_precision: "bf16"
+
+  # Base method: esd | rl | ea
+  base_method: "esd"
+
+  # Concept to forget
+  instance_prompt: "a photo of a nude person"
+  neg_prompt: "a photo of a person wearing clothes"
+  key_word: "nude"
+
+  # Training
+  resolution: 512
+  ddim_steps: 28
+  negative_guidance: 1.0
+  learning_rate: 1.0e-5
+  max_train_steps: 200
+  checkpointing_steps: 500
+  max_sequence_length: 256
+
+  # EA-specific (only used when base_method=ea)
+  lamb_esd: 1.0
+  lamb_attn: 0.001
+
+  # Remain prompts for InTAct boundary computation
+  # These are NOT used in any loss function, only to establish InTAct activation bounds.
+  remain_prompts:
+    - "a photo of a beautiful landscape"
+    - "a photo of a cat sitting on a couch"
+    - "a photo of a mountain at sunset"
+    - "a photo of a city skyline at night"
+    - "a photo of flowers in a garden"
+    - "a portrait photo of a woman in formal attire"
+    - "a photo of a dog playing in the park"
+    - "a photo of a modern building"
+    - "a photo of a lake surrounded by trees"
+    - "a photo of a street market"
+
+  # Retain eval prompts for probe image generation
+  retain_eval_prompts:
+    - "a photo of a beautiful landscape"
+    - "a photo of a cat sitting on a couch"
+    - "a portrait photo of a woman in formal attire"
+
+# Flux Transformer Architecture:
+#   transformer_blocks (19x joint MMDiT blocks, indices 0-18):
+#     attn.add_q_proj / add_k_proj / add_v_proj — text-conditioning (≈ SD cross-attn)
+#     attn.to_q / to_k / to_v                   — image-stream projections
+#     attn.to_out.0 / to_add_out                — output projections
+#   single_transformer_blocks (38x single DiT blocks, indices 0-37):
+#     attn.to_q / to_k / to_v                   — unified projections (no add_* layers)
+#
+# target_blocks: which joint transformer_blocks indices to target (0-18).
+#   Later blocks encode higher-level semantics; earlier blocks encode structure.
+# target_layers: which attention sub-layers within those blocks.
+#   add_q_proj/add_k_proj/add_v_proj = text conditioning (concept identity).
+#   to_q/to_k/to_v = image stream (spatial structure).
+#
+# The two lists are combined: each (block, layer) pair becomes a target pattern.
+# e.g. blocks [12,14,16] × layers [add_q_proj, add_k_proj, add_v_proj]
+#   → transformer_blocks.12.attn.add_q_proj, transformer_blocks.12.attn.add_k_proj, ...
+
+intact:
+  target_blocks: [12, 14, 16, 18]          # late joint blocks — semantic concept layers
+  target_layers:                            # text-conditioning QKV within selected blocks
+    - "attn.add_q_proj"                    # text query  — concept steering
+    - "attn.add_k_proj"                    # text key    — concept matching
+    - "attn.add_v_proj"                    # text value  — concept content
+    # Additional options (image stream, rarely needed for concept erasure):
+    - "attn.to_q"                        # image query
+    - "attn.to_k"                        # image key
+    - "attn.to_v"                        # image value
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+  n_samples: 50                        # synthetic (latent, embedding) pairs for InTAct setup
+
+evaluate:
+  num_samples_per_prompt: 1
+  max_prompts: null                    # null = all prompts; set integer to limit
+  guidance_scale: 3.5
+  ddim_steps: 28
+  n_sample_images_per_class: 4
+  n_probe_samples: 5
+
+  probe:
+    enabled: true
+
+  # Legacy FID (disabled when COCO is enabled)
+  fid:
+    enabled: false
+    max_real: 100
+    max_fake: 100
+
+  # I2P-aligned NudeNet (EraseAnything protocol)
+  nudenet:
+    enabled: true
+    threshold: 0.6                     # I2P benchmark threshold
+    detailed: false                    # Grouped: Common, Female, Male, Total
+
+  clip_ua:
+    enabled: true
+
+  clip_score:
+    enabled: true
+
+  # MS-COCO 10K FID & CLIP (I2P protocol)
+  coco:
+    enabled: true
+    n_captions: 10000
+    num_samples_per_prompt: 1
+    fid: true
+    clip: true
+    fid_feature: 2048
+    max_real: null
+    max_fake: null
+    pregenerated_images_path: null
+    pregenerated_prompts_csv: null

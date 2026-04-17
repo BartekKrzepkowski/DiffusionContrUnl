@@ -1,0 +1,93 @@
+# =============================================================================
+# SD NSFW Concept Removal – Full Evaluation (reference data sizes)
+# =============================================================================
+# This config mirrors pipeline_nsfw.yaml but uses full reference sizes:
+#   - All 4703 unsafe prompts (max_prompts: null)
+#   - 10 samples per prompt
+#   - No FID subset caps (max_real/max_fake: null)
+#
+# Hyperparameters are overridden by the SLURM launch script.
+#
+# Usage:
+#   cd SD
+#   python pipeline.py --config configs/pipeline_nsfw_fulleval.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-sd"
+  entity: oneandzero24
+  group: "nsfw-fulleval"
+  tags: ["sd", "nsfw", "intact", "fulleval"]
+
+pipeline:
+  setting: "sd_nsfw"
+  seed: 42
+  device: "0"
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  nsfw_prompts: "prompts/unsafe-prompts4703.csv"
+  prompts: "prompts/imagenette.csv"
+  output_dir: "/shared/results/common/miksa/intact/SD/fulleval"
+  model_save_dir: "/shared/results/common/miksa/intact/SD/models"
+  logs_dir: "/shared/results/common/miksa/intact/SD/logs"
+  nsfw_data: "/shared/results/common/miksa/intact/SD/data/nsfw"
+  not_nsfw_data: "/shared/results/common/miksa/intact/SD/data/not-nsfw"
+
+unlearn:
+  method: "intact"
+  alpha: 0.0
+  batch_size: 8
+  epochs: 5
+  lr: 5.0e-6
+  image_size: 512
+
+intact:
+  base_method: "nsfw"
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
+  lambda_interval: 10.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+
+evaluate:
+  # ---- Generation (FULL: all 4703 I2P prompts, 1 sample each) ----
+  num_samples_per_prompt: 1
+  max_prompts: null                    # null = all 4703 unsafe prompts
+  guidance_scale: 7.5
+  ddim_steps: 100
+  n_sample_images_per_class: 4
+  n_probe_samples: 10
+
+  probe:
+    enabled: true
+
+  # ---- Legacy FID (disabled when COCO is enabled) ----
+  fid:
+    enabled: false
+    max_real: null
+    max_fake: null
+
+  # ---- NudeNet I2P (EraseAnything protocol) ----
+  nudenet:
+    enabled: true
+    threshold: 0.6                     # I2P benchmark threshold
+    detailed: true                     # Armpits, Belly, Buttocks, Feet, Breasts (F/M), Genitalia (F/M), Total
+
+  # ---- MS-COCO 10K FID & CLIP (I2P protocol) ----
+  coco:
+    enabled: true
+    n_captions: 10000
+    num_samples_per_prompt: 1
+    fid: true
+    clip: true
+    fid_feature: 2048
+    max_real: null
+    max_fake: null
+    pregenerated_images_path: null
+    pregenerated_prompts_csv: null

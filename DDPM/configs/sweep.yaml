@@ -1,0 +1,29 @@
+# ============================================================================
+# wandb sweep – DDPM (example)
+# ============================================================================
+# Usage:
+#   cd DDPM
+#   wandb sweep configs/sweep.yaml
+#   wandb agent <sweep-id>
+
+program: pipeline.py
+method: grid
+entity: oneandzero24
+project: intact-ddpm
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --config
+  - configs/pipeline.yaml
+
+parameters:
+  unlearn.lr:
+    values: [0.01, 0.001, 0.0001]
+  unlearn.n_iters:
+    values: [1000, 1500, 3000]
+  intact.lambda_interval:
+    values: [0.1, 1.0, 5.0, 10.0, 100.0]
+  unlearn.method:
+    values: ["rl"]

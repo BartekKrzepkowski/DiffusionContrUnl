@@ -1,0 +1,71 @@
+# =============================================================================
+# SD Class Forgetting Pipeline Config (Imagenette)
+# =============================================================================
+# Usage:
+#   cd SD
+#   python pipeline.py --config configs/pipeline_class.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-sd"
+  entity: oneandzero24                        # set to your wandb entity
+  group: "class-forgetting"
+  tags: ["sd", "class-wise", "intact"]
+
+pipeline:
+  setting: "sd"                         # sd | sd_nsfw
+  seed: 42
+  device: "0"                           # CUDA device id
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  prompts: "prompts/imagenette.csv"
+  output_dir: "/shared/results/common/miksa/intact/SD/evaluation"  # Where generated images are saved
+  model_save_dir: "/shared/results/common/miksa/intact/SD/models"  # Where model checkpoints are saved
+  logs_dir: "/shared/results/common/miksa/intact/SD/logs"          # Where training logs/losses are saved
+
+# Imagenette class indices:
+#  0 - tench
+#  1 - english_springer
+#  2 - cassette_player
+#  3 - chain_saw
+#  4 - church
+#  5 - french_horn
+#  6 - garbage_truck
+#  7 - gas_pump
+#  8 - golf_ball
+#  9 - parachute
+
+unlearn:
+  method: "intact"                      # intact | ga | rl
+  class_to_forget: 0
+  alpha: 0.0
+  batch_size: 8
+  epochs: 5
+  lr: 5.0e-6
+  image_size: 512
+
+intact:
+  base_method: "rl"                     # ga | rl
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']  
+  lambda_interval: 10.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+
+evaluate:
+  num_samples_per_prompt: 10
+  max_prompts: null                 # null = use all prompts; set to limit generation time
+  guidance_scale: 7.5
+  ddim_steps: 100
+  n_sample_images_per_class: 4       # how many example images per class to upload to wandb
+
+  fid:
+    enabled: true
+    max_real: 100                  # null = use all; set e.g. 500 for fast pipeline eval
+    max_fake: 100                 # null = use all; set e.g. 500 for fast pipeline eval

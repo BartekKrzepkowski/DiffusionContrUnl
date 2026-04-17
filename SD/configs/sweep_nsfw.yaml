@@ -1,0 +1,29 @@
+# =============================================================================
+# wandb Sweep – SD NSFW Removal
+# =============================================================================
+# Usage:
+#   cd SD
+#   wandb sweep configs/sweep_nsfw.yaml
+#   wandb agent <sweep-id>
+# =============================================================================
+
+program: pipeline.py
+method: grid
+name: sd-nsfw-sweep
+entity: oneandzero24
+project: intact-sd
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config"
+  - "configs/pipeline_nsfw.yaml"
+
+parameters:
+  unlearn.lr:
+    values: [1.0e-5, 5.0e-5, 5.0e-6, 1.0e-4]
+  unlearn.epochs:
+    values: [2, 3, 5]
+  intact.lambda_interval:
+    values: [0.5, 1.0, 5.0, 10.0, 100.0]

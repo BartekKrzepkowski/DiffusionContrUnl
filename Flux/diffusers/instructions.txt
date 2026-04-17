@@ -1,0 +1,20 @@
+conda create --name flux python=3.9
+conda activate flux
+conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=12.1 -c pytorch -c nvidia
+ 
+pip install transformers sentencepiece einops omegaconf
+# pip install tokenizers==0.20.0 # cause error of package conflicts
+pip install tokenizers==0.21.0
+
+pip install nltk wandb openai
+
+cd peft
+pip install -e .[torch]
+
+
+cd ../diffusers
+pip install -e .[torch]
+
+#download diffusers 0.32.0
+mv utils and scheduler directory into diffusers/src/diffusers
+pip install matplotlib

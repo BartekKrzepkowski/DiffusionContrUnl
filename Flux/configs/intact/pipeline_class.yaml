@@ -1,0 +1,117 @@
+# =============================================================================
+# Flux InTAct Pipeline Config — Class Forgetting (Imagenette)
+# =============================================================================
+# Usage:
+#   cd Flux
+#   python intact_pipeline.py --config configs/intact/pipeline_class.yaml
+# =============================================================================
+
+wandb:
+  project: "intact-flux"
+  entity: null                         # set to your wandb entity
+  group: "class-forgetting"
+  tags: ["flux", "class", "intact"]
+
+pipeline:
+  setting: "flux_class"
+  seed: 42
+  device: "0"                          # CUDA device id
+
+paths:
+  prompts: "prompts/imagenette.csv"                                         # case_number, prompt, evaluation_seed
+  output_dir: "/net/tscratch/people/plgphelm/unl/Flux/evaluation"                # where generated images / probes are saved
+  model_save_dir: "/net/tscratch/people/plgphelm/unl/Flux/models"                # where safetensors checkpoints go
+  logs_dir: "/net/tscratch/people/plgphelm/unl/Flux/logs"                        # where training logs/losses are saved
+  reference_data: null
+
+# Imagenette class indices:
+#  0 - tench
+#  1 - english_springer
+#  2 - cassette_player
+#  3 - chain_saw
+#  4 - church
+#  5 - french_horn
+#  6 - garbage_truck
+#  7 - gas_pump
+#  8 - golf_ball
+#  9 - parachute
+
+unlearn:
+  pretrained_model_name_or_path: "black-forest-labs/FLUX.1-dev"
+  revision: null
+  variant: null
+  mixed_precision: "bf16"
+
+  # Base method: esd | rl
+  base_method: "rl"
+
+  # Class to forget (Imagenette index)
+  class_to_forget: 0
+  instance_prompt: "tench"             # overridden per-class in pipeline
+  neg_prompt: "a photo"                # generic redirect for rl
+  key_word: null
+
+  # Training
+  resolution: 512
+  ddim_steps: 28
+  negative_guidance: 1.0
+  learning_rate: 1.0e-5
+  max_train_steps: 200
+  checkpointing_steps: 500
+  max_sequence_length: 256
+
+  # Remain prompts for InTAct boundary computation (non-forget classes)
+  remain_prompts:
+    - "a photo of an English springer spaniel"
+    - "a photo of a cassette player"
+    - "a photo of a chain saw"
+    - "a photo of a church"
+    - "a photo of a French horn"
+    - "a photo of a garbage truck"
+    - "a photo of a gas pump"
+    - "a photo of a golf ball"
+    - "a photo of a parachute"
+
+# Flux Transformer Architecture (19 joint MMDiT blocks, indices 0-18):
+#   target_blocks — which transformer_blocks to target
+#   target_layers — which attention sub-layers (add_q/k/v = text, to_q/k/v = image)
+
+intact:
+  target_blocks: [12, 14, 16, 18]          # late joint blocks
+  target_layers:
+    - "attn.add_q_proj"                    # text query
+    - "attn.add_k_proj"                    # text key
+    - "attn.add_v_proj"                    # text value
+  lambda_interval: 1.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 32
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+  n_samples: 50
+
+evaluate:
+  num_samples_per_prompt: 10
+  max_prompts: null
+  guidance_scale: 3.5
+  ddim_steps: 28
+  n_sample_images_per_class: 4
+  n_probe_samples: 5
+
+  probe:
+    enabled: true
+
+  fid:
+    enabled: true
+    max_real: 100
+    max_fake: 100
+
+  nudenet:
+    enabled: false
+
+  clip_ua:
+    enabled: false
+
+  clip_score:
+    enabled: true

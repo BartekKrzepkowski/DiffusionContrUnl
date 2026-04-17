@@ -1,0 +1,48 @@
+name: ldm
+channels:
+  - pytorch
+  - defaults
+
+dependencies:
+  - python=3.9
+  - pip
+
+  - pip:
+      # ---- Core numeric stack ----
+      - numpy==1.26.4
+      - pyarrow==14.0.2
+      - matplotlib==3.8.0
+
+      # ---- PyTorch (CUDA bundled, H100 compatible) ----
+      - torch==2.1.2
+      - torchvision==0.16.2
+      - torchaudio==2.1.2
+
+      # ---- HuggingFace stack (known good combo) ----
+      - diffusers==0.14.0
+      - transformers==4.27.4
+      - tokenizers==0.12.1
+      - datasets==2.14.6
+      - huggingface_hub==0.16.4
+      - accelerate==0.18.0
+
+      # ---- Vision & augmentation ----
+      - opencv-python==4.7.0.72
+      - albumentations==0.4.3
+      - kornia==0.6
+
+      # ---- Training & utils ----
+      - pytorch-lightning==1.4.2
+      - torchmetrics==0.6.0
+      - torch-fidelity==0.3.0
+      - einops==0.3.0
+      - omegaconf==2.1.1
+      - imageio==2.9.0
+      - imageio-ffmpeg==0.4.2
+      - pudb
+      - invisible-watermark
+
+      # ---- Editable installs ----
+      - -e git+https://github.com/CompVis/taming-transformers.git@master#egg=taming-transformers
+      - -e git+https://github.com/openai/CLIP.git@main#egg=clip
+      - -e .

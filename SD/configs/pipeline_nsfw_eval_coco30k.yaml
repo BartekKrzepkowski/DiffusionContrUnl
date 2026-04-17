@@ -1,0 +1,71 @@
+# SD NSFW Eval-Only – COCO30k FID & CLIP
+# Loads a specific model, generates 30k COCO images, computes FID & CLIP
+# Usage: python pipeline.py --config configs/pipeline_nsfw_eval_coco30k.yaml --eval-only
+
+wandb:
+  project: "intact-sd"
+  entity: oneandzero24
+  group: "nsfw-coco30k-eval"
+  tags: ["sd", "nsfw", "intact", "coco30k", "eval-only"]
+
+pipeline:
+  setting: "sd_nsfw"
+  seed: 42
+  device: "0"
+  eval_only: true
+  model_name: "compvis-intact-nsfw-targets_attn2.to_q_attn2.to_k_attn2.to_v-lambda_1-lr_5e-06"
+
+paths:
+  sd_config: "configs/stable-diffusion/v1-intact.yaml"
+  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  diffusers_config: "diffusers_unet_config.json"
+  nsfw_prompts: "prompts/unsafe-prompts4703.csv"
+  prompts: "prompts/imagenette.csv"
+  output_dir: "/shared/results/common/miksa/intact/SD/coco30k_eval"
+  model_save_dir: "/shared/results/common/miksa/intact/SD/models"
+  logs_dir: "/shared/results/common/miksa/intact/SD/logs"
+  coco_images_dir: "/shared/results/common/miksa/intact/SD/data/coco_val2014_30k_ref"
+
+unlearn:
+  method: "intact"
+  alpha: 0.0
+  batch_size: 8
+  epochs: 5
+  lr: 5.0e-6
+  image_size: 512
+
+intact:
+  base_method: "nsfw"
+  targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']
+  lambda_interval: 10.0
+  lower_percentile: 0.05
+  upper_percentile: 0.95
+  reduced_dim: 64
+  infinity_scale: 20.0
+  use_actual_bounds: true
+  normalize_protection: true
+
+evaluate:
+  num_samples_per_prompt: 1
+  probe:
+    enabled: false
+  fid:
+    enabled: false
+  nudenet:
+    enabled: false
+  # do not generate I2P / unsafe-prompt images; only use pre-generated (or none)
+  skip_i2p: true
+  coco:
+    enabled: true
+    n_captions: 30000
+    num_samples_per_prompt: 1
+    # name of HF dataset providing 30k validation images
+    # if provided, the local ``coco_images_dir`` is ignored
+    hf_dataset: "sayakpaul/coco-30-val-2014"
+    fid: true
+    clip: true
+    fid_feature: 2048
+    max_real: null
+    max_fake: null
+    pregenerated_images_path: null
+    pregenerated_prompts_csv: "prompts/coco_30k.csv"
