@@ -28,7 +28,9 @@ def load_model_from_config(config, ckpt, device="cpu", verbose=False):
     if isinstance(config, (str, Path)):
         config = OmegaConf.load(config)
 
-    pl_sd = torch.load(ckpt, map_location="cpu")
+    # SD v1 checkpoints are trusted local Lightning pickles; PyTorch >=2.6
+    # defaults to weights_only=True, which rejects their callback metadata.
+    pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
     global_step = pl_sd["global_step"]
     sd = pl_sd["state_dict"]
     model = instantiate_from_config(config.model)
@@ -366,7 +368,8 @@ def save_model(
     if save_diffusers:
         print("Saving Model in Diffusers Format")
         savemodelDiffusers(
-            name, compvis_config_file, diffusers_config_file, device=device
+            name, compvis_config_file, diffusers_config_file, device=device,
+            checkpoint_path=path
         )
 
 

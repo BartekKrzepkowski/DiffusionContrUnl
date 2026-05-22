@@ -1301,7 +1301,10 @@ class LatentDiffusion(DDPM):
         loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
         loss_dict.update({f"{prefix}/loss_simple": loss_simple.mean()})
 
-        logvar_t = self.logvar[t].to(self.device)
+        # CompVis keeps logvar as a plain tensor when learn_logvar=False, so
+        # model.to(device) does not move it together with registered buffers.
+        logvar = self.logvar.to(device=t.device, dtype=loss_simple.dtype)
+        logvar_t = logvar[t]
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar
         if self.learn_logvar:

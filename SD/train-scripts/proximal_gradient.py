@@ -1,6 +1,5 @@
 import argparse
 import os
-from time import sleep
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,11 +7,18 @@ import pandas as pd
 import torch
 from convertModels import savemodelDiffusers
 from dataset import setup_forget_data, setup_model, setup_remain_data
-from diffusers import LMSDiscreteScheduler
 from einops import rearrange, repeat
 from PIL import Image
 from torchvision.utils import make_grid
 from tqdm import tqdm
+
+
+def _next_or_restart(iterator, loader):
+    try:
+        return next(iterator), iterator
+    except StopIteration:
+        iterator = iter(loader)
+        return next(iterator), iterator
 
 
 def proximal_gradient(
@@ -36,12 +42,6 @@ def proximal_gradient(
     # MODEL TRAINING SETUP
     model = setup_model(config_path, ckpt_path, device)
     criteria = torch.nn.MSELoss()
-    scheduler = LMSDiscreteScheduler(
-        beta_start=0.00085,
-        beta_end=0.012,
-        beta_schedule="scaled_linear",
-        num_train_timesteps=1000,
-    )
 
     remain_dl, descriptions = setup_remain_data(class_to_forget, batch_size, image_size)
     forget_dl, _ = setup_forget_data(class_to_forget, batch_size, image_size)
@@ -60,6 +60,11 @@ def proximal_gradient(
         # train all layers
         if train_method == "full":
             parameters.append(param)
+    if not parameters:
+        raise ValueError(
+            f"No trainable parameters selected for train_method={train_method!r}. "
+            "Expected one of: xattn, full."
+        )
 
     optimizer = torch.optim.Adam(parameters, lr=lr)
 
@@ -74,13 +79,21 @@ def proximal_gradient(
 
     # TRAINING CODE
     for epoch in range(epochs):
+        forget_iter = iter(forget_dl)
+        remain_iter = iter(remain_dl)
         with tqdm(total=len(forget_dl)) as time:
 
-            for i, (images, labels) in enumerate(forget_dl):
+            for i in range(len(forget_dl)):
                 optimizer.zero_grad()
 
-                forget_images, forget_labels = next(iter(forget_dl))
-                remain_images, remain_labels = next(iter(remain_dl))
+                (forget_images, forget_labels), forget_iter = _next_or_restart(
+                    forget_iter,
+                    forget_dl,
+                )
+                (remain_images, remain_labels), remain_iter = _next_or_restart(
+                    remain_iter,
+                    remain_dl,
+                )
 
                 forget_prompts = [descriptions[label] for label in forget_labels]
 
@@ -134,7 +147,8 @@ def proximal_gradient(
                 # total loss
                 loss = forget_loss + alpha * remain_loss
                 loss.backward()
-                losses.append(loss.item() / batch_size)
+                loss_value = float(loss.detach().cpu())
+                losses.append(loss_value)
 
                 optimizer.step()
 
@@ -183,8 +197,7 @@ def proximal_gradient(
                         cnt += param.numel()
 
                 time.set_description("Epoch %i" % epoch)
-                time.set_postfix(loss=loss.item() / batch_size)
-                sleep(0.1)
+                time.set_postfix(loss=loss_value)
                 time.update(1)
 
     model.eval()
@@ -201,7 +214,11 @@ def proximal_gradient(
 
 
 def moving_average(a, n=3):
-    ret = np.cumsum(a, dtype=float)
+    values = np.asarray(a, dtype=float)
+    if values.size == 0:
+        return values
+    n = max(1, min(int(n), int(values.size)))
+    ret = np.cumsum(values, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1 :] / n
 
@@ -239,8 +256,12 @@ def save_model(
     if save_diffusers:
         print("Saving Model in Diffusers Format")
         savemodelDiffusers(
-            name, compvis_config_file, diffusers_config_file, device=device
+            name, compvis_config_file, diffusers_config_file, device=device,
+            checkpoint_path=path
         )
+        diffusers_path = f"{folder_path}/{name.replace('compvis','diffusers')}.pt"
+        if not os.path.exists(diffusers_path):
+            raise FileNotFoundError(f"Diffusers export failed or wrote no checkpoint: {diffusers_path}")
 
 
 def save_history(losses, name, word_print):

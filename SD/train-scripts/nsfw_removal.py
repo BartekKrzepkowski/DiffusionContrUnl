@@ -1,6 +1,5 @@
 import argparse
 import os
-from time import sleep
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,12 +9,24 @@ from dataset import (
     setup_forget_nsfw_data,
     setup_model,
 )
-from diffusers import LMSDiscreteScheduler
 from ldm.models.diffusion.ddim import DDIMSampler
 from tqdm import tqdm
 
+
+def _next_or_restart(iterator, loader):
+    try:
+        return next(iterator), iterator
+    except StopIteration:
+        iterator = iter(loader)
+        return next(iterator), iterator
+
+
 def moving_average(a, n=3):
-    ret = np.cumsum(a, dtype=float)
+    values = np.asarray(a, dtype=float)
+    if values.size == 0:
+        return values
+    n = max(1, min(int(n), int(values.size)))
+    ret = np.cumsum(values, dtype=float)
     ret[n:] = ret[n:] - ret[:-n]
     return ret[n - 1 :] / n
 
@@ -48,12 +59,6 @@ def nsfw_removal(
     # MODEL TRAINING SETUP
     model = setup_model(config_path, ckpt_path, device)
     sampler = DDIMSampler(model)
-    scheduler = LMSDiscreteScheduler(
-        beta_start=0.00085,
-        beta_end=0.012,
-        beta_schedule="scaled_linear",
-        num_train_timesteps=1000,
-    )
     criteria = torch.nn.MSELoss()
     forget_dl, remain_dl = setup_forget_nsfw_data(batch_size, image_size)
 
@@ -67,6 +72,11 @@ def nsfw_removal(
         # train all layers
         if train_method == "full":
             parameters.append(param)
+    if not parameters:
+        raise ValueError(
+            f"No trainable parameters selected for train_method={train_method!r}. "
+            "Expected one of: xattn, full."
+        )
     # set model to train
     model.train()
 
@@ -86,21 +96,25 @@ def nsfw_removal(
 
     # TRAINING CODE
     for epoch in range(epochs):
+        forget_iter = iter(forget_dl)
+        remain_iter = iter(remain_dl)
         with tqdm(total=len(forget_dl)) as time:
             # with tqdm(total=10) as time:
 
-            for i, iages in enumerate(forget_dl):
+            for i in range(len(forget_dl)):
                 # for i in range(1):
                 optimizer.zero_grad()
 
-                forget_images = next(iter(forget_dl))
-                remain_images = next(iter(remain_dl))
+                forget_images, forget_iter = _next_or_restart(forget_iter, forget_dl)
+                remain_images, remain_iter = _next_or_restart(remain_iter, remain_dl)
 
-                forget_prompts = [word_nude] * batch_size
+                forget_batch_size = int(forget_images.shape[0])
+                remain_batch_size = int(remain_images.shape[0])
+                forget_prompts = [word_nude] * forget_batch_size
 
                 # player -> truck
-                pseudo_prompts = [word_wear] * batch_size
-                remain_prompts = [word_wear] * batch_size
+                pseudo_prompts = [word_wear] * forget_batch_size
+                remain_prompts = [word_wear] * remain_batch_size
 
                 # remain stage
                 remain_batch = {
@@ -146,7 +160,8 @@ def nsfw_removal(
                 # total loss
                 loss = forget_loss + alpha * remain_loss
                 loss.backward()
-                losses.append(loss.item() / batch_size)
+                loss_value = float(loss.detach().cpu())
+                losses.append(loss_value)
 
                 if mask_path:
                     for n, p in model.named_parameters():
@@ -157,8 +172,7 @@ def nsfw_removal(
 
                 optimizer.step()
                 time.set_description("Epoch %i" % epoch)
-                time.set_postfix(loss=loss.item() / batch_size)
-                sleep(0.1)
+                time.set_postfix(loss=loss_value)
                 time.update(1)
 
     model.eval()
@@ -199,8 +213,11 @@ def save_model(
         print("Saving Model in Diffusers Format")
         savemodelDiffusers(
             name, compvis_config_file, diffusers_config_file, device=device,
-            save_dir=model_save_dir
+            save_dir=model_save_dir, checkpoint_path=path
         )
+        diffusers_path = f"{folder_path}/{name.replace('compvis','diffusers')}.pt"
+        if not os.path.exists(diffusers_path):
+            raise FileNotFoundError(f"Diffusers export failed or wrote no checkpoint: {diffusers_path}")
 
 
 def save_history(losses, name, word_print):

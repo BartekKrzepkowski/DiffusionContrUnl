@@ -1003,8 +1003,15 @@ def convert_open_clip_checkpoint(checkpoint):
     return text_model
 
 
-def savemodelDiffusers(name, compvis_config_file, diffusers_config_file, device="cpu", save_dir="models"):
-    checkpoint_path = f"{save_dir}/{name}/{name}.pt"
+def savemodelDiffusers(
+    name,
+    compvis_config_file,
+    diffusers_config_file,
+    device="cpu",
+    save_dir="models",
+    checkpoint_path=None,
+):
+    checkpoint_path = checkpoint_path or f"{save_dir}/{name}/{name}.pt"
 
     original_config_file = compvis_config_file
     config_file = diffusers_config_file
