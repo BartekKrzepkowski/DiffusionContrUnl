@@ -18,7 +18,7 @@ import os
 
 _CACHE_ROOT = os.environ.get(
     "CACHE_ROOT",
-    "/shared/results/common/miksa/intact/SD/.cache",
+    "/net/storage/pr3/plgrid/plggdnnp/tmp/plgkrzepk/SD/.cache",
 )
 
 # HuggingFace (hub, datasets, tokenizers, diffusers)

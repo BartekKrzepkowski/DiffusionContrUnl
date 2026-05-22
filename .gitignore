@@ -1,2 +1,7 @@
 __pycache__
 InTAct/data
+
+**logs/
+**prompts/
+**models/
+**Papers/

@@ -7,10 +7,13 @@
 # =============================================================================
 
 wandb:
-  project: "intact-sd"
-  entity: oneandzero24                        # set to your wandb entity
+  use_wandb: true
+  project: "stable_diff_dash"
+  entity: null                                # null = use the account/team from WANDB_API_KEY
   group: "class-forgetting"
-  tags: ["sd", "class-wise", "intact"]
+  mode: "online"                              # online | offline | disabled
+  tags: ["sd", "class-wise", "dash"]
+  log_model_artifact: false                   # false keeps large checkpoints on storage without copying them into W&B artifacts
 
 pipeline:
   setting: "sd"                         # sd | sd_nsfw
@@ -19,12 +22,12 @@ pipeline:
 
 paths:
   sd_config: "configs/stable-diffusion/v1-intact.yaml"
-  sd_ckpt: "models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
+  sd_ckpt: "/net/storage/pr3/plgrid/plggdnnp/SD/models/ldm/stable-diffusion-v1/sd-v1-4-full-ema.ckpt"
   diffusers_config: "diffusers_unet_config.json"
   prompts: "prompts/imagenette.csv"
-  output_dir: "/shared/results/common/miksa/intact/SD/evaluation"  # Where generated images are saved
-  model_save_dir: "/shared/results/common/miksa/intact/SD/models"  # Where model checkpoints are saved
-  logs_dir: "/shared/results/common/miksa/intact/SD/logs"          # Where training logs/losses are saved
+  output_dir: "/net/storage/pr3/plgrid/plggdnnp/plgkrzepk/SD/evaluation"  # Where generated images are saved
+  model_save_dir: "/net/storage/pr3/plgrid/plggdnnp/plgkrzepk/SD/models"  # Where model checkpoints are saved
+  logs_dir: "/net/storage/pr3/plgrid/plggdnnp/plgkrzepk/SD/logs"          # Where training logs/losses are saved
 
 # Imagenette class indices:
 #  0 - tench
@@ -39,18 +42,91 @@ paths:
 #  9 - parachute
 
 unlearn:
-  method: "intact"                      # intact | ga | rl
+  method: "roft"                          # intact | ga | rl | roft
   class_to_forget: 0
-  alpha: 0.0
+  forget_classes: null                  # optional list, e.g. ["tench", "golf_ball"]
+  forget_concepts: null                 # optional alias for forget_classes
+  # train_method controls which SD U-Net parameters are updated during unlearning:
+  #   null        = train dash.target when DASH warm_start is enabled; otherwise unet_xattn
+  #   full        = all parameters in model.model.diffusion_model, including norms/biases/etc.
+  #   unet/all    = weights of all Linear and Conv2d modules in the U-Net; bias only if dash.include_bias=true
+  #   unet_xattn  = Linear/Conv2d modules whose path contains attn2, i.e. cross-attention only
+  #   unet_attn   = all attention modules: paths/types containing attn/attention, including self- and cross-attention
+  #   unet_resnet = ResBlock/ResNet-path Linear/Conv2d modules, i.e. convolutional residual blocks
+  train_method: unet
+  alpha: 0.8
   batch_size: 8
-  epochs: 5
-  lr: 5.0e-6
+  epochs: 3
+  lr: 5.0e-4
+  rl_loss_mode: "output_matching"        # output_matching = previous RL; denoise_pseudo = pseudo-prompt denoising target
+  wandb_log_interval: 1                 # 0 disables per-step W&B training loss logging
+  log_grad_norms: true                  # logs grouped U-Net grad norms to W&B
+  grad_norm_log_interval: 3             # log grad norms 3 times per epoch at evenly spaced steps; 0 disables
   image_size: 512
+  full_retain_per_epoch: true           # false = cycle retain to match forget steps; true = run max(retain, forget) steps without cycling exhausted loaders
+  save_final_checkpoint: false          # true = keep final trained model checkpoint for later generation/evaluation
+
+dash:
+  warm_start: false
+  # target uses the same U-Net subset names as train_method, except full is not a DASH target.
+  # Most common narrow scopes: unet_xattn = cross-attention; unet_attn = self+cross attention; unet_resnet = residual blocks.
+  # target: "unet_resnet"
+  target: "unet_attn"
+  signal_mode: "retain_only"    # retain_only | forget_perp_retain | preserve_complement
+  plasticity_granularity: "per_filter"  # global | per_filter; controls non-attention modules
+  attention_head_wise: true          # false = attention follows plasticity_granularity; true = Linear attention projections use head-wise units
+  grad_aggregation: "ema"              # mean | ema
+  alpha: 0.1
+  num_aug: 1
+  aug_mode: "none"
+  min_shrink: 0.5
+  svd_truncate_evr: 0.95
+  preserve_forget_evr: 0.95
+  include_bias: false
+  log_cosine_histograms: true
+  cosine_hist_bins: 50
+  attention_logging:
+    enabled: true
+    log_histogram: true
+    log_cdf: true
+    log_median: true
+    log_delta_norms: false
+    groups:
+      - "attn2.to_q"
+      - "attn2.to_k"
+      - "attn2.to_v"
+      - "attn2.to_out"
+  retain_batches: 8
+  forget_batches: 8
+  bn_recalibrate: true
+  bn_recalib_batches: 200
+
+train_eval:
+  enabled: true                   # Expensive: saves temp checkpoint, generates images, computes metrics during training.
+  run_before_first_epoch: true   # If true, compute baseline metrics before DASH and before epoch 0.
+  interval_epochs: 3
+  run_last: true
+  keep_checkpoints: false          # false = remove epoch_eval/checkpoints after metrics/images are computed.
+  clip_score: true
+  ua: true
+  per_class_retain_accuracy: true
+  fid:
+    enabled: true
+    max_real: 100
+    max_fake: 100
+    batch_size: 64
+  num_samples_per_prompt: 4
+  max_prompts: 10                 # Imagenette has 10 prompts; lower this for a faster probe.
+  max_generated_images: 10        # Safety guard for per-epoch eval cost.
+  guidance_scale: 7.5
+  ddim_steps: 25
+  n_outer: 1
+  prompts_path: null              # null = SD/prompts/imagenette.csv
 
 intact:
   base_method: "rl"                     # ga | rl
   targets: ['attn2.to_q', 'attn2.to_k', 'attn2.to_v']  
-  lambda_interval: 10.0
+  lambda_interval: 1.0
   lower_percentile: 0.05
   upper_percentile: 0.95
   reduced_dim: 64
