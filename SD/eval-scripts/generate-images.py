@@ -28,6 +28,7 @@ def generate_images(
     model_dir="models",
     max_prompts=None,
     n_outer=1,
+    generation_batch_size=None,
 ):
     """
     Function to generate images from diffusers code
@@ -85,7 +86,9 @@ def generate_images(
         )
         from omegaconf import OmegaConf
         
-        checkpoint = torch.load(base_model_path, map_location="cpu")
+        # SD v1 checkpoints are trusted local Lightning pickles; PyTorch >=2.6
+        # defaults to weights_only=True, which rejects their callback metadata.
+        checkpoint = torch.load(base_model_path, map_location="cpu", weights_only=False)
         if "state_dict" in checkpoint:
             checkpoint = checkpoint["state_dict"]
         
@@ -152,8 +155,9 @@ def generate_images(
         except FileNotFoundError:
             raise  # Don't swallow missing-model errors
         except Exception as e:
-            print(f"Could not load fine-tuned UNet: {e}")
-            print("Using base UNet instead")
+            raise RuntimeError(
+                f"Could not load fine-tuned UNet from {model_path}; refusing to evaluate the base UNet instead."
+            ) from e
     scheduler = LMSDiscreteScheduler(
         beta_start=0.00085,
         beta_end=0.012,
@@ -174,9 +178,12 @@ def generate_images(
 
     folder_path = f"{save_path}/{model_name}"
     os.makedirs(folder_path, exist_ok=True)
+    if generation_batch_size is None:
+        generation_batch_size = int(os.environ.get("SD_GENERATION_BATCH_SIZE", num_samples))
+    generation_batch_size = max(1, min(int(generation_batch_size), int(num_samples)))
 
     for _, row in df.iterrows():
-        prompt = [str(row.prompt)] * num_samples
+        prompt_text = str(row.prompt)
         seed = row.evaluation_seed
         case_number = row.case_number
         if case_number < from_case:
@@ -187,13 +194,12 @@ def generate_images(
         num_inference_steps = ddim_steps
         guidance_scale = guidance_scale
         generator = torch.manual_seed(seed)
-        batch_size = len(prompt)
 
         for i in range(n_outer):
-            # Check if all images for this prompt already exist
+            # Check if all images for this prompt already exist.
             all_exist = True
-            for num in range(batch_size):
-                img_path = f"{folder_path}/{case_number}_{i * batch_size + num}.png"
+            for num in range(num_samples):
+                img_path = f"{folder_path}/{case_number}_{i * num_samples + num}.png"
                 if not os.path.exists(img_path):
                     all_exist = False
                     break
@@ -201,58 +207,70 @@ def generate_images(
                 print(f"Skipping case_number {case_number} batch {i}: images already exist.")
                 continue
 
-            text_input = tokenizer(
-                prompt,
-                padding="max_length",
-                max_length=tokenizer.model_max_length,
-                truncation=True,
-                return_tensors="pt",
-            )
-            text_embeddings = text_encoder(text_input.input_ids.to(torch_device))[0]
-            max_length = text_input.input_ids.shape[-1]
-            uncond_input = tokenizer(
-                [""] * batch_size,
-                padding="max_length",
-                max_length=max_length,
-                return_tensors="pt",
-            )
-            uncond_embeddings = text_encoder(uncond_input.input_ids.to(torch_device))[0]
-            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-            latents = torch.randn(
-                (batch_size, unet.in_channels, height // 8, width // 8),
-                generator=generator,
-            )
-            latents = latents.to(torch_device)
-            scheduler.set_timesteps(num_inference_steps)
-            latents = latents * scheduler.init_noise_sigma
-            from tqdm.auto import tqdm
-            scheduler.set_timesteps(num_inference_steps)
-            for t in tqdm(scheduler.timesteps):
-                latent_model_input = torch.cat([latents] * 2)
-                latent_model_input = scheduler.scale_model_input(
-                    latent_model_input, timestep=t
+            for sample_start in range(0, num_samples, generation_batch_size):
+                sample_end = min(sample_start + generation_batch_size, num_samples)
+                sample_indices = list(range(sample_start, sample_end))
+                missing_indices = [
+                    num for num in sample_indices
+                    if not os.path.exists(f"{folder_path}/{case_number}_{i * num_samples + num}.png")
+                ]
+                if not missing_indices:
+                    continue
+
+                prompt = [prompt_text] * len(missing_indices)
+                batch_size = len(prompt)
+                text_input = tokenizer(
+                    prompt,
+                    padding="max_length",
+                    max_length=tokenizer.model_max_length,
+                    truncation=True,
+                    return_tensors="pt",
                 )
+                text_embeddings = text_encoder(text_input.input_ids.to(torch_device))[0]
+                max_length = text_input.input_ids.shape[-1]
+                uncond_input = tokenizer(
+                    [""] * batch_size,
+                    padding="max_length",
+                    max_length=max_length,
+                    return_tensors="pt",
+                )
+                uncond_embeddings = text_encoder(uncond_input.input_ids.to(torch_device))[0]
+                text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+                latents = torch.randn(
+                    (batch_size, unet.in_channels, height // 8, width // 8),
+                    generator=generator,
+                )
+                latents = latents.to(torch_device)
+                scheduler.set_timesteps(num_inference_steps)
+                latents = latents * scheduler.init_noise_sigma
+                from tqdm.auto import tqdm
+                scheduler.set_timesteps(num_inference_steps)
+                for t in tqdm(scheduler.timesteps):
+                    latent_model_input = torch.cat([latents] * 2)
+                    latent_model_input = scheduler.scale_model_input(
+                        latent_model_input, timestep=t
+                    )
+                    with torch.no_grad():
+                        noise_pred = unet(
+                            latent_model_input, t, encoder_hidden_states=text_embeddings
+                        ).sample
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (
+                        noise_pred_text - noise_pred_uncond
+                    )
+                    latents = scheduler.step(noise_pred, t, latents).prev_sample
+                latents = 1 / 0.18215 * latents
                 with torch.no_grad():
-                    noise_pred = unet(
-                        latent_model_input, t, encoder_hidden_states=text_embeddings
-                    ).sample
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
-                latents = scheduler.step(noise_pred, t, latents).prev_sample
-            latents = 1 / 0.18215 * latents
-            with torch.no_grad():
-                image = vae.decode(latents).sample
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
-            images = (image * 255).round().astype("uint8")
-            pil_images = [Image.fromarray(image) for image in images]
-            for num, im in enumerate(pil_images):
-                img_path = f"{folder_path}/{case_number}_{i * batch_size + num}.png"
-                if not os.path.exists(img_path):
-                    im.save(img_path)
-                    print(f"Saved {img_path}")
+                    image = vae.decode(latents).sample
+                image = (image / 2 + 0.5).clamp(0, 1)
+                image = image.detach().cpu().permute(0, 2, 3, 1).numpy()
+                images = (image * 255).round().astype("uint8")
+                pil_images = [Image.fromarray(image) for image in images]
+                for num, im in zip(missing_indices, pil_images):
+                    img_path = f"{folder_path}/{case_number}_{i * num_samples + num}.png"
+                    if not os.path.exists(img_path):
+                        im.save(img_path)
+                        print(f"Saved {img_path}")
 
 
 if __name__ == "__main__":
@@ -329,6 +347,13 @@ if __name__ == "__main__":
         required=False,
         default="models",
     )
+    parser.add_argument(
+        "--generation_batch_size",
+        help="number of images to denoise/decode at once",
+        type=int,
+        required=False,
+        default=None,
+    )
     args = parser.parse_args()
 
     model_name = args.model_name
@@ -356,4 +381,5 @@ if __name__ == "__main__":
         base_model_path=base_model_path,
         base_config_path=base_config_path,
         model_dir=args.model_dir,
+        generation_batch_size=args.generation_batch_size,
     )
